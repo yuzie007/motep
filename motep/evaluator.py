@@ -3,6 +3,7 @@
 import argparse
 import logging
 import pathlib
+from concurrent.futures import ProcessPoolExecutor
 from copy import copy
 from pprint import pformat
 
@@ -26,6 +27,7 @@ class Evaluator:
         self,
         mtp_data: MTPData,
         engine: str = "numba",
+        numprocesses: int = 1,
     ) -> None:
         """Initialize Evaluator.
 
@@ -35,10 +37,13 @@ class Evaluator:
             MTP potential data.
         engine : str
             Engine to use for calculations ("numpy", "numba", "jax", "cext", etc.).
+        numprocesses : int
+            Number of processes for the evaluation of images.
 
         """
         self.mtp_data = mtp_data
         self.engine = engine
+        self.numprocesses = numprocesses
 
     def evaluate(self, images: list) -> list:
         """Run MTP calculations on images.
@@ -57,32 +62,35 @@ class Evaluator:
         # Create shallow copies to preserve originals
         images_eval = [copy(_) for _ in images]
 
-        for atoms in images_eval:
-            # Save targets before replacing calculator
-            targets = atoms.calc.results
-            atoms.calc = MTP(self.mtp_data, engine=self.engine, mode="run")
-            atoms.calc.targets = targets
-            atoms.get_potential_energy()
+        with ProcessPoolExecutor(self.numprocesses) as executor:
+            return list(executor.map(self.submit, images_eval))
 
-        return images_eval
+    def submit(self, atoms):
+        targets = atoms.calc.results
+        atoms.calc = MTP(self.mtp_data, engine=self.engine, mode="run")
+        atoms.calc.targets = targets
+        atoms.get_potential_energy()
+        return atoms
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments."""
     parser.add_argument("setting")
+    parser.add_argument("-n", "--numprocesses", default=1, type=int)
 
 
-def evaluate_from_setting(filename_setting: str, comm: MPI.Comm) -> None:
+def evaluate_from_setting(filename_setting: str, numprocesses: int) -> None:
     """Evaluate the MTP potential on data from a setting file and print errors.
 
     Parameters
     ----------
     filename_setting : str
         Path to the setting file.
-    comm : MPI.Comm
-        MPI communicator.
+    numprocesses : int
+        Number of processes for the evaluation of images.
 
     """
+    comm = MPI.COMM_WORLD
     setting = load_setting_apply(filename_setting)
     if comm.rank == 0:
         logger.info(pformat(setting))
@@ -106,7 +114,7 @@ def evaluate_from_setting(filename_setting: str, comm: MPI.Comm) -> None:
     mtp_data.species = species
 
     # Run evaluation
-    evaluator = Evaluator(mtp_data, engine=setting.engine)
+    evaluator = Evaluator(mtp_data, engine=setting.engine, numprocesses=numprocesses)
     images_eval = evaluator.evaluate(images)
 
     # Print errors
@@ -119,4 +127,4 @@ def run(args: argparse.Namespace) -> None:
     """Run."""
     comm = MPI.COMM_WORLD
     with measure_time("total", comm):
-        evaluate_from_setting(args.setting, comm)
+        evaluate_from_setting(args.setting, args.numprocesses)
