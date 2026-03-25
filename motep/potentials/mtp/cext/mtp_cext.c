@@ -202,12 +202,6 @@ void calc_train(
 {
     int rbs = radial_basis_size;
 
-    /* Initialize energies with species baseline */
-    for (int i = 0; i < n_atoms; i++)
-    {
-        energies[i] = species_coeffs[itypes[i]];
-    }
-
     /* Note: rbd/mbd arrays are normally zeroed before enering this function */
 
     /* ========================================================================
@@ -397,11 +391,22 @@ void calc_train(
         /* ====================================================================
          * Step 9: Compute energy from moment coefficients for this atom
          * ==================================================================== */
+        /* Initialize energies with species baseline */
+        /* Use the Neumaier summation algorithm to reduce floating-point error */
+        double s = species_coeffs[itype];
+        double c = 0.0;
         for (int iamc = 0; iamc < n_alpha_scalar; iamc++)
         {
             int alpha_idx = alpha_moment_mapping[iamc];
-            energies[i] += moment_coeffs[iamc] * m[alpha_idx];
+            double x = moment_coeffs[iamc] * m[alpha_idx];
+            double t = s + x;
+            if (fabs(s) >= fabs(x))
+                c += (s - t) + x;
+            else
+                c += (x - t) + s;
+            s = t;
         }
+        energies[i] = s + c;
 
         /* ====================================================================
          * Cleanup
