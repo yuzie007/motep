@@ -14,7 +14,7 @@ mtp_cext = Extension(
         np.get_include(),
         "motep/potentials/mtp/cext",
     ],
-    extra_compile_args=["-O3", "-ffast-math", "-march=native"],
+    extra_compile_args=["-O3", "-ffast-math"],
 )
 
 if __name__ == "__main__":
